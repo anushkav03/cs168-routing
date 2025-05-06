@@ -153,14 +153,25 @@ class DVRouter(DVRouterBase):
         """
         
         ##### Begin Stages 4, 10 #####
+        update = False
+
         link_latency = self.ports.get_latency(port)
         overall_latency = route_latency + link_latency
         t = self.table
         
         # if route not in table yet 
-        # or ad is from next-hop 
+        if (not (route_dst in self.table)): 
+            update = True
+
+        # or ad is from next-hop
+        elif port == t[route_dst].port:
+            update = True 
+
         # or better latency than current
-        if (not (route_dst in self.table)) or (port in self.ports.get_all_ports()) or (overall_latency < t[route_dst].latency): 
+        elif overall_latency < t[route_dst].latency:
+            update = True
+        
+        if update:
             t[route_dst] = TableEntry(dst=route_dst, port=port, latency=overall_latency, expire_time=api.current_time()+self.ROUTE_TTL)
 
         ##### End Stages 4, 10 #####
