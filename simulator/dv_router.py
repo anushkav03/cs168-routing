@@ -125,10 +125,20 @@ class DVRouter(DVRouterBase):
         ##### Begin Stages 3, 6, 7, 8, 10 #####
 
         ## Stage 3: Send periodic adverts ##
+        
         for p in self.ports.get_all_ports():
             for host, entry in self.table.items():
-                self.send_route(p, entry.dst, entry.latency)
 
+                ## Stage 6: Don't advertise a path back to the neighbour who gave it to you ##
+                if self.SPLIT_HORIZON:
+                    if entry.port != p:
+                        self.send_route(p, entry.dst, min(INFINITY, entry.latency))
+
+                ## Stage 7: Explicitly advertise poison back to the neighbour who gave you a path ##
+                elif self.POISON_REVERSE and entry.port == p:
+                    self.send_route(p, entry.dst, INFINITY)
+                else:
+                    self.send_route(p, entry.dst, min(INFINITY, entry.latency))
 
         ##### End Stages 3, 6, 7, 8, 10 #####
 
@@ -139,6 +149,19 @@ class DVRouter(DVRouterBase):
         """
         
         ##### Begin Stages 5, 9 #####
+        expired_routes = []
+        t = self.table
+
+        for host, entry in t.items():
+            if api.current_time() >= entry.expire_time: # if curr time is beyond expire time for the entry
+                expired_routes.append(host)     
+       
+        for host in expired_routes:
+            if self.POISON_EXPIRED:
+                port = t[host].port
+                t[host] = TableEntry(dst=host, port=port, latency=INFINITY, expire_time=(api.current_time()+self.ROUTE_TTL))
+            else:
+                t.pop(host) # delete entry
 
         ##### End Stages 5, 9 #####
 
