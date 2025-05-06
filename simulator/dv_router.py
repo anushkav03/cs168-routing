@@ -77,6 +77,9 @@ class DVRouter(DVRouterBase):
         assert port in self.ports.get_all_ports(), "Link should be up, but is not."
 
         ##### Begin Stage 1 #####
+        t = self.table # fwding table
+        latency = self.ports.get_latency(port)
+        t[host] = TableEntry(dst=host, port=port, latency=latency, expire_time=FOREVER)
 
         ##### End Stage 1 #####
 
@@ -92,6 +95,18 @@ class DVRouter(DVRouterBase):
         """
         
         ##### Begin Stage 2 #####
+        destination = packet.dst
+        if destination in self.table:
+            table_entry = self.table[destination]
+
+            dest_port = table_entry.port
+            overall_latency = table_entry.latency
+
+            if overall_latency >= INFINITY:
+                return # drop pkts
+            else:
+                self.send(packet=packet, port=dest_port) # send packet
+
 
         ##### End Stage 2 #####
 
@@ -108,6 +123,12 @@ class DVRouter(DVRouterBase):
         """
         
         ##### Begin Stages 3, 6, 7, 8, 10 #####
+
+        ## Stage 3: Send periodic adverts ##
+        for p in self.ports.get_all_ports():
+            for host, entry in self.table.items():
+                self.send_route(p, entry.dst, entry.latency)
+
 
         ##### End Stages 3, 6, 7, 8, 10 #####
 
@@ -132,6 +153,15 @@ class DVRouter(DVRouterBase):
         """
         
         ##### Begin Stages 4, 10 #####
+        link_latency = self.ports.get_latency(port)
+        overall_latency = route_latency + link_latency
+        t = self.table
+        
+        # if route not in table yet 
+        # or ad is from next-hop 
+        # or better latency than current
+        if (not (route_dst in self.table)) or (port in self.ports.get_all_ports()) or (overall_latency < t[route_dst].latency): 
+            t[route_dst] = TableEntry(dst=route_dst, port=port, latency=overall_latency, expire_time=api.current_time()+self.ROUTE_TTL)
 
         ##### End Stages 4, 10 #####
 
