@@ -58,6 +58,7 @@ class DVRouter(DVRouterBase):
         self.table.owner = self
 
         ##### Begin Stage 10A #####
+        self.history = {} # {Port: {Host: latest TableEntry()}, - - - }       
 
         ##### End Stage 10A #####
 
@@ -81,6 +82,8 @@ class DVRouter(DVRouterBase):
         latency = self.ports.get_latency(port)
         t[host] = TableEntry(dst=host, port=port, latency=latency, expire_time=FOREVER)
 
+        ## 10A: populate self.history with new port ##
+        # self.history[port] = {}  
         ##### End Stage 1 #####
 
     def handle_data_packet(self, packet, in_port):
@@ -124,21 +127,47 @@ class DVRouter(DVRouterBase):
         
         ##### Begin Stages 3, 6, 7, 8, 10 #####
 
+        ## 10A helpers ##
+        def isNewRoute(port, host, entry_latency):
+            if port not in self.history or host not in self.history[port]: # this port is not in history altho idk how that would happen
+                return True
+            port_hosts = self.history[port] # returns a dict {Host: Entry_latency, Host: Entry_latency - - -}
+            return port_hosts[host] != entry_latency # current latency differs from last sent latency
+
+        def updateHistory(port, host, entry_latency):
+            if port not in self.history:
+                self.history[port] = {}
+            self.history[port][host] = entry_latency
+
         ## Stage 3: Send periodic adverts ##
+        t = self.table
         
         for p in self.ports.get_all_ports():
-            for host, entry in self.table.items():
+            for host, entry in t.items():
+                adv_latency = min(INFINITY, entry.latency)
 
                 ## Stage 6: Don't advertise a path back to the neighbour who gave it to you ##
-                if self.SPLIT_HORIZON:
-                    if entry.port != p:
-                        self.send_route(p, entry.dst, min(INFINITY, entry.latency))
+                if self.SPLIT_HORIZON and entry.port != p:
+                    if force or isNewRoute(p, host, adv_latency): # only refuse to send if force==false AND isNewRoute==false
+                        self.send_route(p, host, adv_latency)
+                        updateHistory(p, host, adv_latency)
+                    else:
+                        pass
+                         
+                elif self.SPLIT_HORIZON and entry.port == p: # refuse to send under Split Horizon rules
+                    pass
 
                 ## Stage 7: Explicitly advertise poison back to the neighbour who gave you a path ##
                 elif self.POISON_REVERSE and entry.port == p:
-                    self.send_route(p, entry.dst, INFINITY)
+                    self.send_route(p, host, INFINITY)
+                    updateHistory(p, host, INFINITY)
+
                 else:
-                    self.send_route(p, entry.dst, min(INFINITY, entry.latency))
+                    if force or isNewRoute(p, host, adv_latency): # only refuse to send if force==false AND isNewRoute==false
+                        self.send_route(p, host, adv_latency)
+                        updateHistory(p, host, adv_latency)
+                    else:
+                        pass
 
         ##### End Stages 3, 6, 7, 8, 10 #####
 
@@ -196,6 +225,7 @@ class DVRouter(DVRouterBase):
         
         if update:
             t[route_dst] = TableEntry(dst=route_dst, port=port, latency=overall_latency, expire_time=api.current_time()+self.ROUTE_TTL)
+            self.send_routes(force=False) ## Stage 10A
 
         ##### End Stages 4, 10 #####
 
