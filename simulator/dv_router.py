@@ -138,8 +138,13 @@ class DVRouter(DVRouterBase):
 
         ## Stage 3: Send periodic adverts ##
         t = self.table
+
+        if single_port is None:
+            ports = self.ports.get_all_ports()
+        else:
+            ports = [single_port]
         
-        for p in self.ports.get_all_ports():
+        for p in ports:
             for host, entry in t.items():
                 if p == entry.port:
                     # Split Horizon: Don't advertise back
@@ -240,6 +245,8 @@ class DVRouter(DVRouterBase):
         self.ports.add_port(port, latency)
 
         ##### Begin Stage 10B #####
+        if self.SEND_ON_LINK_UP:
+            self.send_routes(single_port=port)
 
         ##### End Stage 10B #####
 
@@ -253,6 +260,21 @@ class DVRouter(DVRouterBase):
         self.ports.remove_port(port)
 
         ##### Begin Stage 10B #####
+        t = self.table
+        remove = []
+
+        if self.POISON_ON_LINK_DOWN:
+            for host, entry in t.items():
+                if entry.port == port:
+                    t[host] = TableEntry(dst=host, port=port, latency=INFINITY, expire_time=(api.current_time()+self.ROUTE_TTL))
+                    self.send_routes(force=False)
+        elif not self.POISON_ON_LINK_DOWN:
+            for host, entry in t.items():
+                if entry.port == port:
+                    remove.append(host)
+
+        for host in remove:
+            t.pop(host)
 
         ##### End Stage 10B #####
 
